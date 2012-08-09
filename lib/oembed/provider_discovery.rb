@@ -1,3 +1,5 @@
+require 'open-uri'
+
 module OEmbed
   # Uses {oEmbed Discover}[http://oembed.com/#section4] to generate a new Provider
   # instance about a URL for which a Provider didn't previously exist.
@@ -26,43 +28,29 @@ module OEmbed
     # :format:: If given only discover endpoints for the given format. If not format is given, use the first available format found.
     def discover_provider(url, options = {})
       uri = URI.parse(url)
+      data = open(uri.to_s()).read
 
-      res = Net::HTTP.start(uri.host, uri.port) do |http|
-        http.get(uri.request_uri)
+      format = options[:format]
+
+      if format.nil? || format == :json
+        provider_endpoint ||= /<link.*href=['"]*([^\s'"]+)['"]*.*application\/json\+oembed.*>/.match(data)[1] rescue nil
+        provider_endpoint ||= /<link.*application\/json\+oembed.*href=['"]*([^\s'"]+)['"]*.*>/.match(data)[1] rescue nil
+        format ||= :json if provider_endpoint
+      end
+      if format.nil? || format == :xml
+        # {The specification}[http://oembed.com/#section4] says XML discovery should have
+        # type="text/xml+oembed" but some providers use type="application/xml+oembed"
+        provider_endpoint ||= /<link.*href=['"]*([^\s'"]+)['"]*.*(application|text)\/xml\+oembed.*>/.match(data)[1] rescue nil
+        provider_endpoint ||= /<link.*(application|text)\/xml\+oembed.*href=['"]*([^\s'"]+)['"]*.*>/.match(data)[2] rescue nil
+        format ||= :xml if provider_endpoint
       end
 
-      case res
-      when Net::HTTPNotFound
-        raise OEmbed::NotFound, url
-      when Net::HTTPSuccess
-        format = options[:format]
+      provider_endpoint = URI.parse(provider_endpoint)
+      provider_endpoint.query = nil
+      provider_endpoint = provider_endpoint.to_s
 
-        if format.nil? || format == :json
-          provider_endpoint ||= /<link.*href=['"]*([^\s'"]+)['"]*.*application\/json\+oembed.*>/.match(res.body)[1] rescue nil
-          provider_endpoint ||= /<link.*application\/json\+oembed.*href=['"]*([^\s'"]+)['"]*.*>/.match(res.body)[1] rescue nil
-          format ||= :json if provider_endpoint
-        end
-        if format.nil? || format == :xml
-          # {The specification}[http://oembed.com/#section4] says XML discovery should have
-          # type="text/xml+oembed" but some providers use type="application/xml+oembed"
-          provider_endpoint ||= /<link.*href=['"]*([^\s'"]+)['"]*.*(application|text)\/xml\+oembed.*>/.match(res.body)[1] rescue nil
-          provider_endpoint ||= /<link.*(application|text)\/xml\+oembed.*href=['"]*([^\s'"]+)['"]*.*>/.match(res.body)[2] rescue nil
-          format ||= :xml if provider_endpoint
-        end
-
-        begin
-          provider_endpoint = URI.parse(provider_endpoint)
-          provider_endpoint.query = nil
-          provider_endpoint = provider_endpoint.to_s
-        rescue URI::Error
-          raise OEmbed::NotFound, url
-        end
-
-        Provider.new(provider_endpoint, format || OEmbed::Formatter.default)
-      else
-        raise OEmbed::UnknownResponse, res.code
+      Provider.new(provider_endpoint, format || OEmbed::Formatter.default)
       end
-    end
 
     end
   end
