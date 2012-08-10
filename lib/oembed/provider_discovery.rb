@@ -29,6 +29,7 @@ module OEmbed
     def discover_provider(url, options = {})
       uri = URI.parse(url)
       data = open(uri.to_s()).read
+      data = data.encode("utf-8", "utf-8", invalid: :replace, undef: :replace, replace: '')
 
       format = options[:format]
 
